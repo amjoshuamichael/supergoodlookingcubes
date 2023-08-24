@@ -32,12 +32,13 @@ use command_buffer::get_command_buffers;
 use pick_physical_device::{pick_best_physical_device, REQUIRED_EXTENSIONS};
 use vulkano::descriptor_set::allocator::StandardDescriptorSetAllocator;
 use vulkano::descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet};
+use vulkano::pipeline::graphics::depth_stencil::DepthStencilState;
 use vulkano::{VulkanLibrary, swapchain, sync};
 use vulkano::buffer::{Buffer, BufferUsage, BufferCreateInfo};
 use vulkano::command_buffer::allocator::{StandardCommandBufferAllocator, StandardCommandBufferAllocatorCreateInfo};
 use vulkano::device::{QueueCreateInfo, DeviceCreateInfo, Device};
 use vulkano::image::view::ImageView;
-use vulkano::image::{ImageUsage, SwapchainImage};
+use vulkano::image::{ImageUsage, SwapchainImage, AttachmentImage};
 use vulkano::instance::{Instance, InstanceCreateInfo};
 use vulkano::memory::allocator::{StandardMemoryAllocator, MemoryUsage, AllocationCreateInfo};
 use vulkano::pipeline::{GraphicsPipeline, Pipeline};
@@ -124,6 +125,10 @@ fn main() {
             .0,
     );
 
+    let depth_buffer = ImageView::new_default(
+        AttachmentImage::transient(&memory_allocator, dimensions, vulkano::format::Format::D16_UNORM).unwrap(),
+    ).unwrap();
+
     let (swapchain, images) = Swapchain::new(
         device.clone(),
         surface.clone(),
@@ -141,7 +146,7 @@ fn main() {
     .unwrap();
 
     let render_pass = get_render_pass(device.clone(), &swapchain);
-    let framebuffers = get_framebuffers(&images, &render_pass);
+    let framebuffers = get_framebuffers(&images, &render_pass, &depth_buffer);
 
     let vertex_buffer = Buffer::from_iter(
         &memory_allocator,
@@ -195,6 +200,8 @@ fn main() {
         let mut chunk_mapping = chunk_mapping_buffer.write().unwrap();
         
         chunk_mapping.0[0] = 2;
+        chunk_mapping.0[1] = 2;
+        chunk_mapping.0[5] = 2;
         //for c in 0..chunk_mapping.0.len() {
         //    chunk_mapping.0[c] = fastrand::u32(0..(8 as u32)); 
 
@@ -207,16 +214,17 @@ fn main() {
 
         let mut voxels = voxels_buffer.write().unwrap();
 
-        for c in 0..8 {
-            let chunk = &mut voxels.0[c];
+        let chunk = &mut voxels.0[2];
 
-            for v in 0..chunk.len() {
-                //if fastrand::usize(..32) == 0 {
-                //    chunk[v] = fastrand::u32(1..6);
-                //}
-                if v % 2 == 0 {
-                    chunk[v] = fastrand::u32(1..6);
-                }
+        for v in 0..chunk.len() {
+            if v % 2 == 0 {
+                chunk[v] = fastrand::u32(1..6);
+            }
+        }
+
+        for v in 0..chunk.len() {
+            if v % 2 == 0 {
+                chunk[v] = fastrand::u32(1..6);
             }
         }
 
@@ -244,7 +252,7 @@ fn main() {
 
     let camera_data = CameraData {
         aspect_ratio: HEIGHT as f32 / WIDTH as f32, 
-        proj: Mat4::perspective_rh(1.0, std::f32::consts::FRAC_PI_2, 0.1, 100.0),
+        proj: Mat4::perspective_rh(0.7, std::f32::consts::FRAC_PI_2, 0.1, 1.0),
         position: Vec3::new(0.0, 0.0, -1.0),
         ..Default::default()
     };
@@ -327,6 +335,7 @@ fn main() {
 
     let mut time_avg = 0;
     let mut vertex_count = 0;
+    let mut passed_frames = 0;
     event_loop.run(move |event, _, control_flow| {
         match event {
             Event::WindowEvent {
@@ -381,8 +390,6 @@ fn main() {
                     },
                     _ => {},
                 }
-
-                dbg!(&camera_data.position);
             }
             Event::MainEventsCleared => {
                 set_vertex_buffer(
@@ -398,7 +405,7 @@ fn main() {
 
                     let camera_matrix = Mat4::from_quat(camera_rotation) * Mat4::from_translation(-camera_position);
                     camera_data.camera = camera_matrix;
-                    camera_data.proj = Mat4::perspective_lh(3.0, ASPECT_RATIO, 0.1, 1.0);
+                    camera_data.proj = Mat4::perspective_lh(0.7, ASPECT_RATIO, 1.0, 100.0);
                     camera_data.rot = Mat4::from_quat(camera_data.neg_quat());
                 }
 
@@ -433,12 +440,13 @@ fn main() {
                         future.wait(None).unwrap();  // wait for the GPU to finish
                         let time = execution_time.elapsed().as_micros();
                         time_avg += time;
+                        passed_frames += 1;
 
-                        const PRINT_EVERY: u128 = 10;
-                        if time_avg == 10000000 {
-                            let time_per_frame_in_millis = time_avg / PRINT_EVERY;
+                        if time_avg >= 1000000 {
+                            let time_per_frame_in_millis = time_avg / passed_frames;
                             println!("{}fps", 1000000 / time_per_frame_in_millis);
                             time_avg = 0;
+                            passed_frames = 0;
                         }
                     }
                     Err(FlushError::OutOfDate) => {
@@ -464,10 +472,16 @@ fn get_render_pass(device: Arc<Device>, swapchain: &Arc<Swapchain>) -> Arc<Rende
                 format: swapchain.image_format(), // set the format the same as the swapchain
                 samples: 1,
             },
+             depth: {
+                load: Clear,
+                store: DontCare,
+                format: vulkano::format::Format::D16_UNORM,
+                samples: 1,
+            }
         },
         pass: {
             color: [color],
-            depth_stencil: {},
+            depth_stencil: {depth},
         },
     )
     .unwrap()
@@ -476,6 +490,7 @@ fn get_render_pass(device: Arc<Device>, swapchain: &Arc<Swapchain>) -> Arc<Rende
 fn get_framebuffers(
     images: &[Arc<SwapchainImage>],
     render_pass: &Arc<RenderPass>,
+    depth_buffer: &Arc<ImageView<AttachmentImage>>,
 ) -> Vec<Arc<Framebuffer>> {
     images
         .iter()
@@ -484,7 +499,7 @@ fn get_framebuffers(
             Framebuffer::new(
                 render_pass.clone(),
                 FramebufferCreateInfo {
-                    attachments: vec![view],
+                    attachments: vec![view, depth_buffer.clone()],
                     ..Default::default()
                 },
             )
@@ -506,6 +521,7 @@ fn get_pipeline(
         .input_assembly_state(InputAssemblyState::new())
         .viewport_state(ViewportState::viewport_fixed_scissor_irrelevant([viewport]))
         .fragment_shader(fs.entry_point("main").unwrap(), ())
+        .depth_stencil_state(DepthStencilState::simple_depth_test())
         .render_pass(Subpass::from(render_pass, 0).unwrap())
         .build(device)
         .unwrap()
