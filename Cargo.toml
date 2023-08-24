@@ -11,6 +11,9 @@ vulkano-shaders = "0.33.0"
 image = "0.24"
 vulkano-win = "0.33.0"
 winit = "0.28.3"
+fastrand = "2.0.0"
+bytemuck = "1.13"
+glam = { version = "0.24.1", features = ["bytemuck", "glam-assert"] }
 
 [profile.release]
 debug = true

@@ -368,6 +368,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "fastrand"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6999dc1837253364c2ebb0704ba97994bd874e8f195d665c50b7548f6ea92764"
+
+[[package]]
 name = "fdeflate"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -447,6 +453,15 @@ checksum = "80792593675e051cf94a4b111980da2ba60d4a83e43e0048c5693baab3977045"
 dependencies = [
  "color_quant",
  "weezl",
+]
+
+[[package]]
+name = "glam"
+version = "0.24.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42218cb640844e3872cc3c153dc975229e080a6c4733b34709ef445610550226"
+dependencies = [
+ "bytemuck",
 ]
 
 [[package]]
@@ -1224,6 +1239,9 @@ checksum = "6637bab7722d379c8b41ba849228d680cc12d0a45ba1fa2b48f2a30577a06731"
 name = "supergoodlookingcubes"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
+ "fastrand",
+ "glam",
  "image",
  "vulkano",
  "vulkano-shaders",

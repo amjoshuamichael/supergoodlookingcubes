@@ -7,8 +7,9 @@ use vulkano::command_buffer::{
     RenderPassBeginInfo,
 };
 
+use vulkano::descriptor_set::PersistentDescriptorSet;
 use vulkano::device::Queue;
-use vulkano::pipeline::GraphicsPipeline;
+use vulkano::pipeline::{GraphicsPipeline, Pipeline};
 use vulkano::render_pass::Framebuffer;
 
 use crate::shaders::MyVertex;
@@ -18,6 +19,8 @@ pub fn get_command_buffers(
     pipeline: &Arc<GraphicsPipeline>,
     framebuffers: &Vec<Arc<Framebuffer>>,
     vertex_buffer: &Subbuffer<[MyVertex]>,
+    descriptor_set_1: &Arc<PersistentDescriptorSet>,
+    descriptor_set_2: &Arc<PersistentDescriptorSet>,
     allocator: &StandardCommandBufferAllocator,
 ) -> Vec<Arc<PrimaryAutoCommandBuffer>> {
     framebuffers
@@ -40,6 +43,12 @@ pub fn get_command_buffers(
                 )
                 .unwrap()
                 .bind_pipeline_graphics(pipeline.clone())
+                .bind_descriptor_sets(
+                    vulkano::pipeline::PipelineBindPoint::Graphics,
+                    pipeline.layout().clone(),
+                    0,
+                    (descriptor_set_1.clone(), descriptor_set_2.clone()),
+                )
                 .bind_vertex_buffers(0, vertex_buffer.clone())
                 .draw(vertex_buffer.len() as u32, 1, 0, 0)
                 .unwrap()
