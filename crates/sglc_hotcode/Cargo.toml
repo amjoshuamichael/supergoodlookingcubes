@@ -1,0 +1,10 @@
+[package]
+name = "sglc_hotcode"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sglc_shared = { path = "../sglc_shared" }
+fastrand = "2.0.0"
+glam = { version = "0.24.1", features = ["bytemuck", "glam-assert"] }
+num = { version = "0.4.1", default-features = false }

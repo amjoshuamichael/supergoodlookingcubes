@@ -10,23 +10,6 @@ impl<T, const LENGTH: usize> Length for [T; LENGTH] {
     const LEN: usize = LENGTH;
 }
 
-const CHUNK_SIZE_ONE: usize = 8;
-const CHUNK_SIZE: usize = CHUNK_SIZE_ONE.pow(3);
-const CHUNK_COUNT_ONE: usize = 4;
-const CHUNK_COUNT: usize = CHUNK_COUNT_ONE.pow(3);
-
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub struct ChunkMapping([u32; CHUNK_COUNT]);
-unsafe impl bytemuck::Zeroable for ChunkMapping {}
-unsafe impl bytemuck::Pod for ChunkMapping {}
-
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub struct Voxels([[u32; CHUNK_SIZE]; CHUNK_COUNT]);
-unsafe impl bytemuck::Zeroable for Voxels {}
-unsafe impl bytemuck::Pod for Voxels {}
-
 use camera_data::CameraData;
 use command_buffer::get_command_buffers;
 use pick_physical_device::{pick_best_physical_device, REQUIRED_EXTENSIONS};
@@ -49,21 +32,23 @@ use vulkano::render_pass::{RenderPass, Framebuffer, FramebufferCreateInfo, Subpa
 use vulkano::shader::ShaderModule;
 use vulkano::swapchain::{SwapchainCreateInfo, Swapchain, CompositeAlphas, CompositeAlpha, AcquireError, SwapchainPresentInfo};
 use winit::dpi::LogicalSize;
-use winit::event::{Event, WindowEvent, KeyboardInput, ElementState};
+use winit::event::{Event, WindowEvent, KeyboardInput, ElementState, VirtualKeyCode};
 use winit::window::WindowBuilder;
 use winit::event_loop::{ControlFlow, EventLoop};
 use vulkano_win::VkSurfaceBuild;
 use vulkano::sync::{GpuFuture, FlushError};
-use glam::{Vec3, Quat, Mat4};
+use glam::{Vec3, Mat4};
 
 mod pick_physical_device;
 mod shaders;
 mod command_buffer;
 mod camera_data;
-mod create_vertex_buffer;
+mod worlds;
 
-use shaders::MyVertex;
-use create_vertex_buffer::set_vertex_buffer;
+use sglc_hotcode::create_vertex_buffer::set_vertex_buffer;
+use worlds::hills::Hills;
+use worlds::spheres::Spheres;
+use sglc_shared::{WORLD_SIZE_ONE, CHUNK_COUNT_ONE, CHUNK_SIZE_ONE, ChunkMapping, Voxels, MyVertex, Vertices};
 
 const WIDTH: u32 = 320;
 const HEIGHT: u32 = 180;
@@ -148,7 +133,7 @@ fn main() {
     let render_pass = get_render_pass(device.clone(), &swapchain);
     let framebuffers = get_framebuffers(&images, &render_pass, &depth_buffer);
 
-    let vertex_buffer = Buffer::from_iter(
+    let vertex_buffer = Buffer::new_unsized::<Vertices>(
         &memory_allocator,
         BufferCreateInfo {
             usage: BufferUsage::VERTEX_BUFFER,
@@ -158,15 +143,7 @@ fn main() {
             usage: MemoryUsage::Upload,
             ..Default::default()
         },
-        //[
-        //    MyVertex { position: Vec3::new(1.0, 1.0, 0.0) },
-        //    MyVertex { position: Vec3::new(-1.0, 1.0, 0.0) },
-        //    MyVertex { position: Vec3::new(1.0, -1.0, 0.0) },
-        //    MyVertex { position: Vec3::new(-1.0, 1.0, 0.0) },
-        //    MyVertex { position: Vec3::new(1.0, -1.0, 0.0) },
-        //    MyVertex { position: Vec3::new(-1.0, -1.0, 0.0) },
-        //],
-        [MyVertex::default(); CHUNK_COUNT * 6],
+        std::mem::size_of::<Vertices>() as u64,
     )
     .unwrap();
 
@@ -197,54 +174,19 @@ fn main() {
             std::mem::size_of::<Voxels>() as u64,
         ).unwrap();
 
-        let mut chunk_mapping = chunk_mapping_buffer.write().unwrap();
-        
-        chunk_mapping.0[0] = 2;
-        chunk_mapping.0[1] = 2;
-        chunk_mapping.0[5] = 2;
-        //for c in 0..chunk_mapping.0.len() {
-        //    chunk_mapping.0[c] = fastrand::u32(0..(8 as u32)); 
-
-        //    if c % 8 == 0 {
-        //        chunk_mapping.0[c] = 4; 
-        //    } else {
-        //        chunk_mapping.0[c] = 3; 
-        //    }
-        //}
-
-        let mut voxels = voxels_buffer.write().unwrap();
-
-        let chunk = &mut voxels.0[2];
-
-        for v in 0..chunk.len() {
-            if v % 2 == 0 {
-                chunk[v] = fastrand::u32(1..6);
-            }
-        }
-
-        for v in 0..chunk.len() {
-            if v % 2 == 0 {
-                chunk[v] = fastrand::u32(1..6);
-            }
-        }
-
-        std::mem::drop(voxels);
-        std::mem::drop(chunk_mapping);
-
         (chunk_mapping_buffer, voxels_buffer)
     };
 
     let pallete = {
         let mut pallete = Vec::<[f32; 4]>::new();
-        pallete.push([0.0, 0.0, 0.0, 0.0]);
-        pallete.push([0.07, 0.17, 0.20, 0.0]);
-        pallete.push([0.13, 0.28, 0.43, 0.0]);
-        pallete.push([0.16, 0.26, 0.58, 0.0]);
-        pallete.push([0.30, 0.64, 0.85, 0.0]);
-        pallete.push([0.27, 0.81, 0.79, 0.0]);
-
-        if pallete.len() != 256 {
-            pallete.push([0.0, 0.0, 0.0, 0.0]);
+        
+        while pallete.len() != 256 {
+            pallete.push([
+                fastrand::f32(), 
+                fastrand::f32(),
+                fastrand::f32(),
+                fastrand::f32()
+            ]);
         }
 
         pallete
@@ -331,11 +273,19 @@ fn main() {
         &cmd_buffer_allocator,
     );
 
+    let mut worlds: Vec<Box<dyn World>> = vec![
+        Box::new(Spheres::default()),
+        Box::new(Hills::default()),
+    ];
+    let mut world_index = 0;
+
     let mut recreate_swapchain = false;
 
     let mut time_avg = 0;
     let mut vertex_count = 0;
     let mut passed_frames = 0;
+    let mut target_position = Vec3::default();
+    let mut motion_speed = 1.0;
     event_loop.run(move |event, _, control_flow| {
         match event {
             Event::WindowEvent {
@@ -352,7 +302,7 @@ fn main() {
                 event: WindowEvent::KeyboardInput { 
                     input: KeyboardInput {
                         virtual_keycode: Some(keycode),
-                        state: ElementState::Pressed,
+                        state,
                         ..
                     }, 
                     .. 
@@ -360,38 +310,60 @@ fn main() {
                 .. 
             }  => {
                 use winit::event::VirtualKeyCode::*;
+                use winit::event::ElementState::*;
+
                 let camera_data = &mut camera_data_buffer.write().unwrap()[0];
-                let camera_quat = Quat::from_rotation_y(-camera_data.yaw);
+                let camera_quat = camera_data.neg_quat();
 
                 match keycode {
-                    A => {
-                        camera_data.position -= camera_quat * Vec3::X;
+                    LShift if state == Pressed => {
+                        motion_speed = 10.0;
                     },
-                    D => {
-                        camera_data.position += camera_quat * Vec3::X;
+                    LShift if state == Released => {
+                        motion_speed = 1.0;
                     },
-                    Q => {
-                        camera_data.position += camera_quat * Vec3::Y;
+                    A if state == Pressed => {
+                        target_position -= camera_quat * Vec3::X * motion_speed;
                     },
-                    E => {
-                        camera_data.position -= camera_quat * Vec3::Y;
+                    D if state == Pressed => {
+                        target_position += camera_quat * Vec3::X * motion_speed;
                     },
-                    W => {
-                        camera_data.position -= camera_quat * Vec3::Z;
+                    Q if state == Pressed => {
+                        target_position += Vec3::Y * motion_speed;
                     },
-                    S => {
-                        camera_data.position += camera_quat * Vec3::Z;
+                    E if state == Pressed => {
+                        target_position -= Vec3::Y * motion_speed;
                     },
-                    R => {
+                    W if state == Pressed => {
+                        target_position += camera_quat * Vec3::Z * motion_speed;
+                    },
+                    S if state == Pressed => {
+                        target_position -= camera_quat * Vec3::Z * motion_speed;
+                    },
+                    R if state == Pressed => {
                         camera_data.yaw -= 0.1;
                     },
-                    F => {
+                    F if state == Pressed => {
                         camera_data.yaw += 0.1;
                     },
-                    _ => {},
+                    T if state == Pressed => {
+                        camera_data.pitch -= 0.1;
+                    },
+                    G if state == Pressed => {
+                        camera_data.pitch += 0.1;
+                    },
+                    Z => {
+                        world_index += 1;
+                        if world_index == worlds.len() { world_index = 0 }
+                    },
+                    _ => {
+                        worlds[world_index].keyboard_input(keycode, state);
+                    },
                 }
             }
             Event::MainEventsCleared => {
+                let execution_time = std::time::Instant::now();
+
                 set_vertex_buffer(
                     &*chunk_mapping_buffer.read().unwrap(),
                     &mut *vertex_buffer.write().unwrap(),
@@ -405,11 +377,21 @@ fn main() {
 
                     let camera_matrix = Mat4::from_quat(camera_rotation) * Mat4::from_translation(-camera_position);
                     camera_data.camera = camera_matrix;
-                    camera_data.proj = Mat4::perspective_lh(0.7, ASPECT_RATIO, 1.0, 100.0);
-                    camera_data.rot = Mat4::from_quat(camera_data.neg_quat());
+                    camera_data.proj = Mat4::perspective_lh(0.7, ASPECT_RATIO, 1.0, 10000.0);
+                    camera_data.rot = Mat4::from_quat(camera_data.quat_frag());
+
+                    const MOTION_SPEED: f32 = 0.3;
+                    camera_data.position = 
+                        camera_data.position * (1. - MOTION_SPEED) + 
+                        target_position * MOTION_SPEED;
                 }
 
-                let execution_time = std::time::Instant::now();
+                {
+                    let chunk_mapping = &mut *chunk_mapping_buffer.write().unwrap();
+                    let voxels = &mut *voxels_buffer.write().unwrap();
+
+                    worlds[world_index].fill_in_voxels(chunk_mapping, voxels);
+                }
 
                 let (image_i, suboptimal, acquire_future) =
                     match swapchain::acquire_next_image(swapchain.clone(), None) {
@@ -539,4 +521,10 @@ pub fn pick_best_composite_alpha(from: CompositeAlphas) -> Option<CompositeAlpha
     } else {
         None
     }
+}
+
+pub trait World {
+    fn fill_in_voxels(&mut self, chunk_mapping: &mut ChunkMapping, voxels: &mut Voxels);
+
+    fn keyboard_input(&mut self, _: VirtualKeyCode, _: ElementState) { }
 }

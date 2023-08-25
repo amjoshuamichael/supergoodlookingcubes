@@ -1,11 +1,12 @@
-use glam::{Vec3, Mat4, EulerRot, Quat};
+use glam::{Vec3, Mat4, Quat};
 
 #[repr(C)]
 #[derive(bytemuck::Pod, bytemuck::Zeroable, Copy, Clone, Default)]
 pub struct CameraData {
     pub aspect_ratio: f32,
     pub yaw: f32,
-    pub _padding: [u32; 2],
+    pub pitch: f32,
+    pub _padding: [u32; 1],
     pub position: Vec3,
     pub _padding2: f32,
     pub camera: Mat4,
@@ -15,20 +16,14 @@ pub struct CameraData {
 
 impl CameraData {
     pub fn quat(&self) -> Quat {
-        glam::Quat::from_euler(
-            EulerRot::YXZ,
-            self.yaw,
-            0.0,
-            0.0,
-        )
+        Quat::from_rotation_x(self.pitch) * Quat::from_rotation_y(self.yaw)
     }
 
     pub fn neg_quat(&self) -> Quat {
-        glam::Quat::from_euler(
-            EulerRot::YXZ,
-            -self.yaw,
-            0.0,
-            0.0,
-        )
+        Quat::from_rotation_y(-self.yaw) * Quat::from_rotation_x(-self.pitch)
+    }
+
+    pub fn quat_frag(&self) -> Quat {
+        Quat::from_rotation_y(-self.yaw) * Quat::from_rotation_x(-self.pitch)
     }
 }

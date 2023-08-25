@@ -14,6 +14,14 @@ winit = "0.28.3"
 fastrand = "2.0.0"
 bytemuck = "1.13"
 glam = { version = "0.24.1", features = ["bytemuck", "glam-assert"] }
+num = "0.4.1"
+rand = "0.8.5"
+sglc_hotcode = { path = "crates/sglc_hotcode" }
+sglc_shared = { path = "crates/sglc_shared" }
 
 [profile.release]
 debug = true
+
+[profile.dev.package.sglc_hotcode]
+opt-level = 3
+

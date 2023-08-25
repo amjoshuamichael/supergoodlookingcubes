@@ -12,13 +12,14 @@ use vulkano::device::Queue;
 use vulkano::pipeline::{GraphicsPipeline, Pipeline};
 use vulkano::render_pass::Framebuffer;
 
-use crate::shaders::MyVertex;
+use crate::Vertices;
+use sglc_shared::VERTEX_COUNT;
 
 pub fn get_command_buffers(
     queue: &Arc<Queue>,
     pipeline: &Arc<GraphicsPipeline>,
     framebuffers: &Vec<Arc<Framebuffer>>,
-    vertex_buffer: &Subbuffer<[MyVertex]>,
+    vertex_buffer: &Subbuffer<Vertices>,
     descriptor_set_1: &Arc<PersistentDescriptorSet>,
     descriptor_set_2: &Arc<PersistentDescriptorSet>,
     allocator: &StandardCommandBufferAllocator,
@@ -50,7 +51,7 @@ pub fn get_command_buffers(
                     (descriptor_set_1.clone(), descriptor_set_2.clone()),
                 )
                 .bind_vertex_buffers(0, vertex_buffer.clone())
-                .draw(vertex_buffer.len() as u32, 1, 0, 0)
+                .draw(VERTEX_COUNT as u32, 1, 0, 0)
                 .unwrap()
                 .end_render_pass()
                 .unwrap();

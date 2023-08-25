@@ -1,0 +1,9 @@
+[package]
+name = "sglc_shared"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bytemuck = "1.13"
+vulkano = "0.33.0"
+glam = { version = "0.24.1", features = ["bytemuck", "glam-assert"] }
